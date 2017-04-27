@@ -14,8 +14,9 @@ TODO:
 - Stop using print and do proper logging with debug option
 - Make repair hang timeout an option
 """
-import paramiko
 import json
+import os
+import paramiko
 from argparse import ArgumentParser
 from datetime import datetime
 
@@ -26,6 +27,9 @@ STATUS_FINISHED_WITH_ERRORS = 'finished_with_errors'
 STATUS_HUNG = 'hung'
 
 REPAIR_HANG_TIMEOUT_SECONDS = 3 * 60 * 60
+
+ssh = paramiko.SSHClient()
+ssh_config = paramiko.SSHConfig()
 
 
 def build_cluster(nodes, filename):
@@ -91,11 +95,11 @@ def ssh_get_file(host, filename):
     :rtype: str
     :return: File contents.
     """
+    global ssh
     cmd = 'cat {0}'.format(filename)
     print('ssh {0}: {1}'.format(host, cmd))
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(host)
+    cfg = get_ssh_config(host)
+    ssh.connect(**cfg)
     ssh_stdin, ssh_stdout, ssh_stderr = ssh.exec_command(cmd)
     out_str = "\n".join(map(str, ssh_stdout))
     err_str = "\n".join(map(str, ssh_stderr))
@@ -104,6 +108,29 @@ def ssh_get_file(host, filename):
         return out_str
     else:
         raise Exception('Failed to "{0}" on {1}: {2}'.format(cmd, host, err_str))
+
+
+def get_ssh_config(host):
+    """
+    Get SSH config for host.
+
+    :param str host: Hostname.
+
+    :rtype: dict
+    :return: SSHClient.connect params.
+    """
+    global ssh_config
+    cfg = {'hostname': host}
+
+    user_config = ssh_config.lookup(cfg['hostname'])
+    for k in ('hostname', 'username', 'port'):
+        if k in user_config:
+            cfg[k] = user_config[k]
+
+    if 'proxycommand' in user_config:
+        cfg['sock'] = paramiko.ProxyCommand(user_config['proxycommand'])
+
+    return cfg
 
 
 def build_node(node_status):
@@ -160,6 +187,13 @@ if __name__ == '__main__':
     parser.add_argument('nodes', nargs='+')
 
     args = parser.parse_args()
+
+    # Load SSH
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    user_config_file = os.path.expanduser('~/.ssh/config')
+    if os.path.exists(user_config_file):
+        with open(user_config_file) as f:
+            ssh_config.parse(f)
 
     cluster = build_cluster(args.nodes, args.filename)
 
