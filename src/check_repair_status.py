@@ -5,38 +5,18 @@ Script to check repair status on multiple nodes.
 Uses SSH to connect to nodes and look for range_repair.py status output file. Aggregates status information for all
 nodes.
 
-{
-    "current_repair": {
-        "cmd": "nodetool -h localhost -p 7199 repair cisco_test -pr    -st +09176475922996267832 -et +09188223637297142667",
-        "column_families": "<all>",
-        "end": "+09188223637297142667",
-        "keyspace": "cisco_test",
-        "nodeposition": "256/256",
-        "start": "+09176475922996267832",
-        "step": 1,
-        "time": "2017-04-26T03:44:42.543667"
-    },
-    "failed_count": 1,
-    "failed_repairs": [
-        {
-            "cmd": "nodetool -h localhost -p 7199 repair cisco_test -pr    -st -08956690834811572306 -et -08935863217669227885",
-            "column_families": "<all>",
-            "end": "-08935863217669227885",
-            "keyspace": "cisco_test",
-            "nodeposition": "5/256",
-            "start": "-08956690834811572306",
-            "step": 1,
-            "time": "2017-04-26T03:44:41.562615"
-        }
-    ],
-    "finished": "2017-04-26T03:44:42.544609",
-    "started": "2017-04-26T03:44:41.546225",
-    "successful_count": 256,
-    "updated": "2017-04-26T03:44:42.544623"
-}
+Example:
+    ./check_repair_status.py status.json cass-1.example.com cass-2.example.com cass-3.example.com
+
+TODO:
+- Add steps argument to output status JSON so we can do proper percentage calculation
+- Add an option for simple human readable output
+- Stop using print and do proper logging with debug option
+- Make repair hang timeout an option
 """
 import paramiko
 import json
+from argparse import ArgumentParser
 from datetime import datetime
 
 STATUS_NO_DATA = 'no_data'
@@ -46,22 +26,6 @@ STATUS_FINISHED_WITH_ERRORS = 'finished_with_errors'
 STATUS_HUNG = 'hung'
 
 REPAIR_HANG_TIMEOUT_SECONDS = 3 * 60 * 60
-
-
-def ssh_get_file(host, filename):
-    cmd = 'cat {0}'.format(filename)
-    print('ssh {0}: {1}'.format(host, cmd))
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(host)
-    ssh_stdin, ssh_stdout, ssh_stderr = ssh.exec_command(cmd)
-    out_str = "\n".join(map(str, ssh_stdout))
-    err_str = "\n".join(map(str, ssh_stderr))
-    ssh.close()
-    if out_str:
-        return out_str
-    else:
-        raise Exception('Failed to "{0}" on {1}: {2}'.format(cmd, host, err_str))
 
 
 def build_cluster(nodes, filename):
@@ -85,34 +49,61 @@ def build_cluster(nodes, filename):
     }
     percentage_total = 0
 
-    for node in nodes:
+    for host in nodes:
         try:
-            status_str = ssh_get_file(node, filename)
+            status_str = ssh_get_file(host, filename)
             status = json.loads(status_str)
-            cluster[node] = build_node(status)
-            # cluster[node]['raw'] = status
+            cluster[host] = build_node(status)
+            cluster[host]['raw'] = status
         except Exception as e:
             print(str(e))
-            cluster[node] = {
+            cluster[host] = {
                 'status': STATUS_NO_DATA
             }
         cluster['total_nodes'] += 1
-        if cluster[node]['status'] == STATUS_NO_DATA:
+        if cluster[host]['status'] == STATUS_NO_DATA:
             cluster['num_no_data'] += 1
         else:
-            if cluster[node]['status'] == STATUS_FINISHED:
+            if cluster[host]['status'] == STATUS_FINISHED:
                 cluster['num_fully_repaired'] += 1
-            elif cluster[node]['status'] == STATUS_REPAIRING:
+            elif cluster[host]['status'] == STATUS_REPAIRING:
                 cluster['num_repairing'] += 1
-            elif cluster[node]['status'] == STATUS_FINISHED_WITH_ERRORS:
+            elif cluster[host]['status'] == STATUS_FINISHED_WITH_ERRORS:
                 cluster['num_repaired_with_errors'] += 1
-            elif cluster[node]['status'] == STATUS_HUNG:
+            elif cluster[host]['status'] == STATUS_HUNG:
                 cluster['num_hung'] += 1
-            cluster['num_errors'] += cluster[node]['num_failed']
-            percentage_total += cluster[node]['percentage_complete']
+            cluster['num_errors'] += cluster[host]['num_failed']
+            percentage_total += cluster[host]['percentage_complete']
     cluster['percentage_complete'] = percentage_total / cluster['total_nodes']
 
     return cluster
+
+
+def ssh_get_file(host, filename):
+    """
+    SSH into a host and get the contents of a file.
+
+    SSHs into the host and executes a simple cat {filename}.
+
+    :param str host: Host.
+    :param str filename: Filename.
+
+    :rtype: str
+    :return: File contents.
+    """
+    cmd = 'cat {0}'.format(filename)
+    print('ssh {0}: {1}'.format(host, cmd))
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(host)
+    ssh_stdin, ssh_stdout, ssh_stderr = ssh.exec_command(cmd)
+    out_str = "\n".join(map(str, ssh_stdout))
+    err_str = "\n".join(map(str, ssh_stderr))
+    ssh.close()
+    if out_str:
+        return out_str
+    else:
+        raise Exception('Failed to "{0}" on {1}: {2}'.format(cmd, host, err_str))
 
 
 def build_node(node_status):
@@ -164,9 +155,12 @@ def build_node(node_status):
 
 
 if __name__ == '__main__':
-    nodes = ['cass-226-1.onzra.com', 'cass-226-2.onzra.com', 'cass-226-3.onzra.com']
-    filename = 'status.json'
+    parser = ArgumentParser()
+    parser.add_argument('filename')
+    parser.add_argument('nodes', nargs='+')
 
-    cluster = build_cluster(nodes, filename)
+    args = parser.parse_args()
+
+    cluster = build_cluster(args.nodes, args.filename)
 
     print json.dumps(cluster, indent=4)
