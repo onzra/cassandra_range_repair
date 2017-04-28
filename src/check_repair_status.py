@@ -10,7 +10,6 @@ Example:
 
 TODO:
 - Add steps argument to output status JSON so we can do proper percentage calculation
-- Add an option for simple human readable output
 - Stop using print and do proper logging with debug option
 """
 import json
@@ -181,10 +180,15 @@ def build_node(node_status, hang_timeout=10800):
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('filename')
-    parser.add_argument('nodes', nargs='+')
-    parser.add_argument('--hang-timeout', dest='hang_timeout', default=10800)
+    parser = ArgumentParser(description='Check range repair status on multiple nodes')
+    parser.add_argument('filename',
+                        help='Path to range repair status output file')
+    parser.add_argument('nodes', nargs='+',
+                        help='List of nodes to check repair status on')
+    parser.add_argument('--hang-timeout', dest='hang_timeout', default=10800,
+                        help='Timeout in seconds to assume repair has hung')
+    parser.add_argument('--summary', action='store_true',
+                        help='Print a human readable summary instead of JSON')
 
     args = parser.parse_args()
 
@@ -197,4 +201,21 @@ if __name__ == '__main__':
 
     cluster = build_cluster(args.nodes, args.filename, args.hang_timeout)
 
-    print json.dumps(cluster, indent=4)
+    if args.summary:
+        out = "Fully Repaired   {0}\n" \
+              "Repairing        {1}\n" \
+              "With Errors      {2}\n" \
+              "Hung             {3}\n" \
+              "Unknown          {4}\n" \
+              "---------------------\n" \
+              "Percent Complete {5}%".format(
+            cluster['num_fully_repaired'],
+            cluster['num_repairing'],
+            cluster['num_repaired_with_errors'],
+            cluster['num_hung'],
+            cluster['num_no_data'],
+            cluster['percentage_complete'],
+        )
+        print(out)
+    else:
+        print json.dumps(cluster, indent=4)
