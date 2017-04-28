@@ -12,7 +12,6 @@ TODO:
 - Add steps argument to output status JSON so we can do proper percentage calculation
 - Add an option for simple human readable output
 - Stop using print and do proper logging with debug option
-- Make repair hang timeout an option
 """
 import json
 import os
@@ -26,18 +25,17 @@ STATUS_REPAIRING = 'repairing'
 STATUS_FINISHED_WITH_ERRORS = 'finished_with_errors'
 STATUS_HUNG = 'hung'
 
-REPAIR_HANG_TIMEOUT_SECONDS = 3 * 60 * 60
-
 ssh = paramiko.SSHClient()
 ssh_config = paramiko.SSHConfig()
 
 
-def build_cluster(nodes, filename):
+def build_cluster(nodes, filename, hang_timeout=10800):
     """
     Build cluster status object.
 
     :param list nodes: List of nodes to check.
     :param str filename: Status filename.
+    :param int hang_timeout: Repair hang timeout in seconds.
 
     :rtype: dict
     :return: Cluster status object.
@@ -57,7 +55,7 @@ def build_cluster(nodes, filename):
         try:
             status_str = ssh_get_file(host, filename)
             status = json.loads(status_str)
-            cluster[host] = build_node(status)
+            cluster[host] = build_node(status, hang_timeout)
             cluster[host]['raw'] = status
         except Exception as e:
             print(str(e))
@@ -133,13 +131,14 @@ def get_ssh_config(host):
     return cfg
 
 
-def build_node(node_status):
+def build_node(node_status, hang_timeout=10800):
     """
     Build node status object.
 
     Gather some summary metrics from raw node status.
 
     :param dict node_status: Node's repair status object.
+    :param int hang_timeout: Hang timeout in seconds.
 
     :rtype: dict
     :return: Node status object.
@@ -163,7 +162,7 @@ def build_node(node_status):
         current_step_time = (datetime.now() - updated).total_seconds()
         finished_on = None
         total_repair_time = None
-        if current_step_time > REPAIR_HANG_TIMEOUT_SECONDS:
+        if current_step_time > hang_timeout:
             status = STATUS_HUNG
         else:
             status = STATUS_REPAIRING
@@ -185,6 +184,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('filename')
     parser.add_argument('nodes', nargs='+')
+    parser.add_argument('--hang-timeout', dest='hang_timeout', default=10800)
 
     args = parser.parse_args()
 
@@ -195,6 +195,6 @@ if __name__ == '__main__':
         with open(user_config_file) as f:
             ssh_config.parse(f)
 
-    cluster = build_cluster(args.nodes, args.filename)
+    cluster = build_cluster(args.nodes, args.filename, args.hang_timeout)
 
     print json.dumps(cluster, indent=4)
