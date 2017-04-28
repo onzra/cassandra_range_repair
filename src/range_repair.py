@@ -161,7 +161,8 @@ class TokenContainer:
                 logging.debug("Discarding node/token %s/%s", segments[0], segments[-1])
                 continue
             self.ring_tokens.append(longish(segments[-1]))
-            logging.debug(str(self.ring_tokens))
+            # Excessive logging
+            # logging.debug(str(self.ring_tokens))
         self.ring_tokens.sort()
         logging.info("Found {0} tokens".format(len(self.ring_tokens)))
         logging.debug(self.ring_tokens)
