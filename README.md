@@ -55,6 +55,7 @@ Options:
                         Exclude a specific step in the repair process, keyspace and column_family are optional
   --output-status=FILENAME
                         Write current repair run status to a file as JSON.
+  --resume              Resume a hung or canceled repair session, requires an existing --output-status file
 ```
 
 ### Sample
@@ -71,6 +72,22 @@ DEBUG      2014-05-09 17:32:47,509    repair_keyspace                 176 : step
 DEBUG      2014-05-09 17:33:54,904    repair_keyspace                 182 : SUCCESS
 ...
 ```
+
+### Resume
+
+If you are using --output-status you can resume a hung or canceled range repair session at the last completed token 
+using the --resume option. You must provide the exact same options as the original command, adding only --resume. This 
+will adjust the starting offset resume repairs where they left off.
+
+Example:
+
+    $ ./range_repair.py -H localhost -k test -s 1 --output-status status.json
+    0001/1/256 nodetool -h localhost -p 7199 repair test -pr    -st -09199621222225968109 -et -09197526493222166483
+    ...
+    0001/151/256 nodetool -h localhost -p 7199 repair test -pr    -st +01989896843880866331 -et +01995383507845825326
+    ^C
+    $ ./range_repair.py -H localhost -k test -s 1 --output-status status.json --resume
+    0001/151/256 nodetool -h localhost -p 7199 repair test -pr    -st +01989896843880866331 -et +01995383507845825326
 
 ### Dependencies
 -   Python 2.7+
@@ -98,5 +115,12 @@ make debian
 - Additional functionality by [Eric Lubow](http://github.com/elubow)
 - Support for multiprocessing performed by [Brian Gallew](https://github.com/BrianGallew) with credit to [M. Jaszczyk](https://github.com/mjaszczyk)
 - Multiple datacenter support by [Brian Gallew](https://github.com/BrianGallew)
-- Support debian packaging [Venkatesh Kaushik] (https://github.com/higgsmass)
-- Exclude step & output status [David Mertl] (https://github.com/dmertl)
+- Support debian packaging [Venkatesh Kaushik](https://github.com/higgsmass)
+- Exclude step & output status [David Mertl](https://github.com/dmertl)
+- Resume support [David Mertl](https://github.com/dmertl)
+
+### TODO
+
+- Resume only supports resuming at a token, support resuming at a step.
+- There is a lot of potential for conflict when using --exclude-step and --output-status or --resume. Maybe these 
+  should be mutually exclusive?

@@ -2,9 +2,7 @@
 """
 This script will allow for smaller repairs of Cassandra ranges.
 
-See the tests subdirectory for example code.
-
-Source: https://github.com/BrianGallew/cassandra_range_repair
+Source: https://github.com/onzra/cassandra_range_repair
 """
 from __future__ import print_function
 
@@ -252,14 +250,23 @@ class RepairStatus(object):
     """
 
     def __init__(self):
+        """
+        Init.
+        """
+        # Repair settings
         self.filename = None
+        self.steps = None
+        # Timestamps
         self.started = None
         self.updated = None
         self.finished = None
-        self.failed_repairs = []
-        self.current_repair = {}
+        self.last_resumed_at = None
+        # Counters
         self.successful_count = 0
         self.failed_count = 0
+        # Repair operations
+        self.failed_repairs = []
+        self.current_repair = {}
 
     def start(self, options):
         """
@@ -268,9 +275,36 @@ class RepairStatus(object):
         :param options: Range repair options.
         """
         self.filename = options.output_status
+        self.steps = options.steps
         self.reset()
         self.started = datetime.now().isoformat()
         self.write()
+
+    def resume(self, options, tokens):
+        """
+        Resume a hung or canceled range repair.
+        
+        :param options: Range repair options.
+        :param TokenContainer tokens: Tokens.
+        
+        :rtype: int
+        :return: Token offset to resume repairs at.
+        """
+        # Repair settings
+        self.filename = options.output_status
+        self.steps = options.steps
+        # Load existing data from output status file
+        f = open(self.filename, 'r')
+        status = json.load(f)
+        f.close()
+        if status['finished']:
+            raise Exception('Cannot resume, repair status indicates it has already finished at {0}'
+                            .format(status['finished']))
+        self._from_output_status(status)
+        # Set resumed data
+        self.last_resumed_at = datetime.now().isoformat()
+        self.write()
+        return int(status['current_repair']['nodeposition'].split('/')[0]) - 1
 
     def reset(self):
         """
@@ -283,6 +317,7 @@ class RepairStatus(object):
         self.current_repair = {}
         self.failed_count = 0
         self.successful_count = 0
+        self.last_resumed_at = None
 
     def repair_start(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
         """
@@ -355,8 +390,25 @@ class RepairStatus(object):
                 'current_repair': self.current_repair,
                 'successful_count': self.successful_count,
                 'failed_count': self.failed_count,
+                'steps': self.steps,
+                'last_resumed_at': self.last_resumed_at,
             }))
             file.close()
+
+    def _from_output_status(self, status):
+        """
+        Load data from existing output status file.
+        
+        :param dict status: Status output data. 
+        """
+        self.started = status['started']
+        self.updated = status['updated']
+        self.finished = status['finished']
+        self.last_resumed_at = status['last_resumed_at']
+        self.failed_repairs = status['failed_repairs']
+        self.current_repair = status['current_repair']
+        self.successful_count = status['successful_count']
+        self.failed_count = status['failed_count']
 
     @staticmethod
     def _build_repair_dict(cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
@@ -494,8 +546,6 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         retryer = ExponentialBackoffRetryer(retry_options, lambda x: x[0], run_command)
         success, cmd, _, stderr = retryer(*cmd)
     else:
-        if repair_status:
-            repair_status.repair_success(cmd, step, start, end, nodeposition, keyspace, column_families)
         print("{step:04d}/{nodeposition}".format(nodeposition=nodeposition, step=step), " ".join([str(x) for x in cmd]))
         success = True
     if not success:
@@ -504,6 +554,9 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         logging.error("FAILED: {nodeposition} step {step:04d} {cmd}".format(nodeposition=nodeposition, step=step, cmd=cmd))
         logging.error(stderr)
         return
+    else:
+        if repair_status:
+            repair_status.repair_success(cmd, step, start, end, nodeposition, keyspace, column_families)
     logging.debug("{nodeposition} step {step:04d} complete".format(nodeposition=nodeposition,step=step))
     return
 
@@ -549,7 +602,10 @@ def repair(options):
     manager = TestManager()
     manager.start()
     repair_status = manager.RepairStatus()
-    repair_status.start(options)
+    if options.resume:
+        options.offset = repair_status.resume(options, tokens)
+    else:
+        repair_status.start(options)
 
     for token_num, host_token in enumerate(tokens.host_tokens):
         range_termination = host_token
@@ -738,6 +794,9 @@ def main():
     parser.add_option("--output-status", dest="output_status",
                       help="Output (and update) a status file for each run")
 
+    parser.add_option("--resume", dest="resume", action='store_true', default=False,
+                      help="Resume a hung or canceled repair session, requires an existing --output-status file")
+
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
                                   "Every failed `nodetool repair` call can be retried using exponential backoff."
                                   " This is useful if you have flaky connectivity between datacenters.")
@@ -776,9 +835,13 @@ def main():
         logging.info('Incremental repairs needs --par: enabling')
         options.par = '-par'
 
+    if options.resume and not options.output_status:
+        parser.print_help()
+        logging.debug('--resume requires --output-status')
+        sys.exit(1)
+
     repair(options)
     exit(0)
 
 if __name__ == "__main__":
     main()
-
