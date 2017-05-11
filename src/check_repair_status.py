@@ -15,6 +15,9 @@ TODO:
 import json
 import os
 import paramiko
+import logging
+import sys
+import csv
 from argparse import ArgumentParser
 from datetime import datetime
 
@@ -24,11 +27,15 @@ STATUS_REPAIRING = 'repairing'
 STATUS_FINISHED_WITH_ERRORS = 'finished_with_errors'
 STATUS_HUNG = 'hung'
 
+NUM_VNODES = 256
+
+DEFAULT_HANG_TIMEOUT = 10800
+
 ssh = paramiko.SSHClient()
 ssh_config = paramiko.SSHConfig()
 
 
-def build_cluster(nodes, filename, hang_timeout=10800):
+def build_cluster(nodes, filename, hang_timeout=DEFAULT_HANG_TIMEOUT):
     """
     Build cluster status object.
 
@@ -40,6 +47,7 @@ def build_cluster(nodes, filename, hang_timeout=10800):
     :return: Cluster status object.
     """
     cluster = {
+        'nodes': {},
         'total_nodes': 0,
         'num_no_data': 0,
         'num_fully_repaired': 0,
@@ -54,27 +62,27 @@ def build_cluster(nodes, filename, hang_timeout=10800):
         try:
             status_str = ssh_get_file(host, filename)
             status = json.loads(status_str)
-            cluster[host] = build_node(status, hang_timeout)
-            cluster[host]['raw'] = status
+            cluster['nodes'][host] = build_node(status, hang_timeout)
+            cluster['nodes'][host]['raw'] = status
         except Exception as e:
-            print(str(e))
-            cluster[host] = {
+            logging.error(str(e))
+            cluster['nodes'][host] = {
                 'status': STATUS_NO_DATA
             }
         cluster['total_nodes'] += 1
-        if cluster[host]['status'] == STATUS_NO_DATA:
+        if cluster['nodes'][host]['status'] == STATUS_NO_DATA:
             cluster['num_no_data'] += 1
         else:
-            if cluster[host]['status'] == STATUS_FINISHED:
+            if cluster['nodes'][host]['status'] == STATUS_FINISHED:
                 cluster['num_fully_repaired'] += 1
-            elif cluster[host]['status'] == STATUS_REPAIRING:
+            elif cluster['nodes'][host]['status'] == STATUS_REPAIRING:
                 cluster['num_repairing'] += 1
-            elif cluster[host]['status'] == STATUS_FINISHED_WITH_ERRORS:
+            elif cluster['nodes'][host]['status'] == STATUS_FINISHED_WITH_ERRORS:
                 cluster['num_repaired_with_errors'] += 1
-            elif cluster[host]['status'] == STATUS_HUNG:
+            elif cluster['nodes'][host]['status'] == STATUS_HUNG:
                 cluster['num_hung'] += 1
-            cluster['num_errors'] += cluster[host]['num_failed']
-            percentage_total += cluster[host]['percentage_complete']
+            cluster['num_errors'] += cluster['nodes'][host]['num_failed']
+            percentage_total += cluster['nodes'][host]['percentage_complete']
     cluster['percentage_complete'] = percentage_total / cluster['total_nodes']
 
     return cluster
@@ -94,7 +102,7 @@ def ssh_get_file(host, filename):
     """
     global ssh
     cmd = 'cat {0}'.format(filename)
-    print('ssh {0}: {1}'.format(host, cmd))
+    logging.info('Checking repair status on {0}'.format(host))
     cfg = get_ssh_config(host)
     ssh.connect(**cfg)
     ssh_stdin, ssh_stdout, ssh_stderr = ssh.exec_command(cmd)
@@ -130,7 +138,7 @@ def get_ssh_config(host):
     return cfg
 
 
-def build_node(node_status, hang_timeout=10800):
+def build_node(node_status, hang_timeout=DEFAULT_HANG_TIMEOUT):
     """
     Build node status object.
 
@@ -170,13 +178,116 @@ def build_node(node_status, hang_timeout=10800):
     percentage_complete = int(float(current_vnode - num_failed) / float(total_vnodes) * 100)
     return {
         'status': status,
-        'node_position': node_position,
+        'nodeposition': node_position,
         'percentage_complete': percentage_complete,
         'current_step_time_seconds': current_step_time,
         'total_repair_time_seconds': total_repair_time,
         'num_failed': num_failed,
+        'started': node_status['started'],
         'finished': finished_on
     }
+
+
+def write_json(data, file_=sys.stdout):
+    """
+    Write full repair stats data as JSON.
+    
+    :param dict data: Repair status data.
+    :param file file_: File to write to.
+    """
+    json.dump(data, file_, indent=4)
+
+
+def write_summary(data, file_=sys.stdout):
+    """
+    Write human readable summary.
+    
+    :param dict data: Repair status data.
+    :param file file_: File to write to.
+    """
+    out = "Fully Repaired   {0}\n" \
+          "Repairing        {1}\n" \
+          "With Errors      {2}\n" \
+          "Hung             {3}\n" \
+          "Unknown          {4}\n" \
+          "---------------------\n" \
+          "Percent Complete {5}%".format(
+        data['num_fully_repaired'],
+        data['num_repairing'],
+        data['num_repaired_with_errors'],
+        data['num_hung'],
+        data['num_no_data'],
+        data['percentage_complete'],
+    )
+    # TODO: Add some aggregate stats:
+    # - Average vnode repair time
+    # - Average host repair time
+    # - Estimate of time to repair entire cluster
+    # Recommended GC Grace - Percentage repaired after 1 iteration will always be 100% but its 100% in how much time?
+    file_.write(out)
+
+def write_csv(data, file_=sys.stdout):
+    """
+    Print CSV summary.
+    
+    :param dict data: Repair status data.
+    :param file file_: File to write to.
+    """
+    writer = csv.writer(file_)
+    headers = ['Host', 'Is In Progress', 'Has Errors', 'Is Hung', 'Started', 'Finished', 'Duration', 'Current Vnode']
+    writer.writerow(headers)
+    totals = {
+        'in_progress': 0,
+        'has_errors': 0,
+        'hung': 0,
+        'start': datetime.max,
+        'end': datetime.min,
+        'duration': 0,
+        'repaired_vnodes': 0,
+    }
+    for hostname, host in data['nodes'].iteritems():
+        # If node has no data, write an empty row and don't include in any totals
+        if host['status'] == STATUS_NO_DATA:
+            writer.writerow([hostname, None, None, None, None, None, None, None])
+            continue
+        # Convert to CSV appropriate data
+        in_progress = int(host['status'] == STATUS_REPAIRING)
+        has_errors = int(host['num_failed'] > 0)
+        is_hung = int(host['status'] == STATUS_HUNG)
+        current_vnode = int(host['nodeposition'].split('/')[0])
+        started = datetime.strptime(host['started'], '%Y-%m-%dT%H:%M:%S.%f')
+        finished = datetime.strptime(host['finished'], '%Y-%m-%dT%H:%M:%S.%f') if host['finished'] else None
+        # Calculate totals
+        totals['in_progress'] += in_progress
+        totals['has_errors'] += has_errors
+        totals['hung'] += is_hung
+        totals['start'] = min(started, totals['start'])
+        totals['end'] = max(finished if finished else datetime.min, totals['end'])
+        totals['duration'] += host['total_repair_time_seconds']
+        totals['repaired_vnodes'] += current_vnode
+        # Write CSV row
+        row = [
+            hostname,
+            in_progress,
+            has_errors,
+            is_hung,
+            host['started'],
+            host['finished'],
+            host['total_repair_time_seconds'],
+            current_vnode,
+        ]
+        writer.writerow(row)
+    footer = [
+        'Total',
+        totals['in_progress'],
+        totals['has_errors'],
+        totals['hung'],
+        totals['start'].isoformat(),
+        totals['end'].isoformat(),
+        totals['duration'],
+        '{0} / {1}'.format(totals['repaired_vnodes'], len(data['nodes'].keys()) * NUM_VNODES),
+    ]
+    writer.writerow(footer)
 
 
 if __name__ == '__main__':
@@ -185,12 +296,14 @@ if __name__ == '__main__':
                         help='Path to range repair status output file')
     parser.add_argument('nodes', nargs='+',
                         help='List of nodes to check repair status on')
-    parser.add_argument('--hang-timeout', dest='hang_timeout', default=10800,
+    parser.add_argument('--hang-timeout', dest='hang_timeout', default=DEFAULT_HANG_TIMEOUT,
                         help='Timeout in seconds to assume repair has hung')
-    parser.add_argument('--summary', action='store_true',
-                        help='Print a human readable summary instead of JSON')
+    parser.add_argument('--format', choices=['summary', 'csv', 'json'], default='json',
+                        help='Output format')
 
     args = parser.parse_args()
+
+    logging.basicConfig()
 
     # Load SSH
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -201,21 +314,9 @@ if __name__ == '__main__':
 
     cluster = build_cluster(args.nodes, args.filename, args.hang_timeout)
 
-    if args.summary:
-        out = "Fully Repaired   {0}\n" \
-              "Repairing        {1}\n" \
-              "With Errors      {2}\n" \
-              "Hung             {3}\n" \
-              "Unknown          {4}\n" \
-              "---------------------\n" \
-              "Percent Complete {5}%".format(
-            cluster['num_fully_repaired'],
-            cluster['num_repairing'],
-            cluster['num_repaired_with_errors'],
-            cluster['num_hung'],
-            cluster['num_no_data'],
-            cluster['percentage_complete'],
-        )
-        print(out)
+    if args.format == 'summary':
+        write_summary(cluster)
+    elif args.format == 'csv':
+        write_csv(cluster)
     else:
-        print json.dumps(cluster, indent=4)
+        write_json(cluster)
