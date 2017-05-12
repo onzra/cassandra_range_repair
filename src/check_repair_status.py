@@ -7,10 +7,6 @@ nodes.
 
 Example:
     ./check_repair_status.py status.json cass-1.example.com cass-2.example.com cass-3.example.com
-
-TODO:
-- Add steps argument to output status JSON so we can do proper percentage calculation
-- Stop using print and do proper logging with debug option
 """
 import json
 import os
@@ -57,6 +53,7 @@ def build_cluster(nodes, filename, hang_timeout=DEFAULT_HANG_TIMEOUT):
         'num_errors': 0,
     }
     percentage_total = 0
+    vnode_time = [0, 0]
 
     for host in nodes:
         try:
@@ -83,7 +80,19 @@ def build_cluster(nodes, filename, hang_timeout=DEFAULT_HANG_TIMEOUT):
                 cluster['num_hung'] += 1
             cluster['num_errors'] += cluster['nodes'][host]['num_failed']
             percentage_total += cluster['nodes'][host]['percentage_complete']
+            vnode_time[0] += cluster['nodes'][host]['avg_vnode_time_seconds']
+            vnode_time[1] += float(1)
     cluster['percentage_complete'] = percentage_total / cluster['total_nodes']
+    cluster['avg_vnode_time_seconds'] = vnode_time[0] / vnode_time[1]
+    # Calculate estimated cluster repair time after so we can use avg time for nodes with no data
+    cluster['est_full_repair_time_seconds'] = 0
+    for host in nodes:
+        if cluster['nodes'][host]['status'] == STATUS_FINISHED:
+            cluster['est_full_repair_time_seconds'] += cluster['nodes'][host]['total_repair_time_seconds']
+        elif cluster['nodes'][host]['status'] == STATUS_NO_DATA:
+            cluster['est_full_repair_time_seconds'] += cluster['avg_vnode_time_seconds'] * NUM_VNODES
+        else:
+            cluster['est_full_repair_time_seconds'] += cluster['est_full_repair_time_seconds']
 
     return cluster
 
@@ -125,7 +134,9 @@ def get_ssh_config(host):
     :return: SSHClient.connect params.
     """
     global ssh_config
-    cfg = {'hostname': host}
+    cfg = {
+        'hostname': host
+    }
 
     user_config = ssh_config.lookup(cfg['hostname'])
     for k in ('hostname', 'username', 'port'):
@@ -166,7 +177,7 @@ def build_node(node_status, hang_timeout=DEFAULT_HANG_TIMEOUT):
             status = STATUS_FINISHED
     else:
         node_position = node_status['current_repair']['nodeposition']
-        current_step_time = (datetime.now() - updated).total_seconds()
+        current_step_time = (datetime.utcnow() - updated).total_seconds()
         finished_on = None
         total_repair_time = None
         if current_step_time > hang_timeout:
@@ -176,6 +187,9 @@ def build_node(node_status, hang_timeout=DEFAULT_HANG_TIMEOUT):
     (current_vnode, total_vnodes) = map(int, node_position.split('/'))
     # Note this calculation assumes steps of 1 (need to put this param in status output to do proper calc)
     percentage_complete = int(float(current_vnode - num_failed) / float(total_vnodes) * 100)
+    # Calculate average time taken to repair 1 vnode
+    current_duration = (updated - started).total_seconds()
+    avg_vnode_time = current_duration / float(current_vnode - 1)
     return {
         'status': status,
         'nodeposition': node_position,
@@ -184,7 +198,10 @@ def build_node(node_status, hang_timeout=DEFAULT_HANG_TIMEOUT):
         'total_repair_time_seconds': total_repair_time,
         'num_failed': num_failed,
         'started': node_status['started'],
-        'finished': finished_on
+        'finished': finished_on,
+        'avg_vnode_time_seconds': avg_vnode_time,
+        'est_full_repair_time_seconds': avg_vnode_time * NUM_VNODES,
+        'est_time_remaining_seconds': avg_vnode_time * (NUM_VNODES - current_vnode),
     }
 
 
@@ -205,26 +222,28 @@ def write_summary(data, file_=sys.stdout):
     :param dict data: Repair status data.
     :param file file_: File to write to.
     """
-    out = "Fully Repaired   {0}\n" \
-          "Repairing        {1}\n" \
-          "With Errors      {2}\n" \
-          "Hung             {3}\n" \
-          "Unknown          {4}\n" \
-          "---------------------\n" \
-          "Percent Complete {5}%".format(
+    out = "Fully Repaired    {0}\n" \
+          "Repairing         {1}\n" \
+          "With Errors       {2}\n" \
+          "Hung              {3}\n" \
+          "Unknown           {4}\n" \
+          "-----------------------\n" \
+          "Percent Complete: {5}%\n" \
+          "Avg. Vnode Time:  {6:.0f}m\n" \
+          "Avg. Host Time:   {7:.0f}m\n" \
+          "Est. Full Repair: {8:.0f}m\n".format(
         data['num_fully_repaired'],
         data['num_repairing'],
         data['num_repaired_with_errors'],
         data['num_hung'],
         data['num_no_data'],
         data['percentage_complete'],
+        data['avg_vnode_time_seconds'] / 60,
+        data['avg_vnode_time_seconds'] * NUM_VNODES / 60,
+        data['est_full_repair_time_seconds'] / 60,
     )
-    # TODO: Add some aggregate stats:
-    # - Average vnode repair time
-    # - Average host repair time
-    # - Estimate of time to repair entire cluster
-    # Recommended GC Grace - Percentage repaired after 1 iteration will always be 100% but its 100% in how much time?
     file_.write(out)
+
 
 def write_csv(data, file_=sys.stdout):
     """
@@ -263,7 +282,7 @@ def write_csv(data, file_=sys.stdout):
         totals['hung'] += is_hung
         totals['start'] = min(started, totals['start'])
         totals['end'] = max(finished if finished else datetime.min, totals['end'])
-        totals['duration'] += host['total_repair_time_seconds']
+        totals['duration'] += host['total_repair_time_seconds'] or 0
         totals['repaired_vnodes'] += current_vnode
         # Write CSV row
         row = [
