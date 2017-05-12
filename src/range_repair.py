@@ -434,7 +434,7 @@ class RepairStatus(object):
             'nodeposition': nodeposition,
             'keyspace': keyspace or '<all>',
             'column_families': column_families or '<all>',
-            'cmd': ' '.join(map(str, cmd))
+            'cmd': cmd
         }
 
 
@@ -536,9 +536,10 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
 
     cmd.extend([options.par, options.inc, options.snapshot,
                  "-st", start, "-et", end])
+    cmd_str = ' '.join(map(str, cmd))
 
     if repair_status:
-        repair_status.repair_start(cmd, step, start, end, nodeposition, keyspace, column_families)
+        repair_status.repair_start(cmd_str, step, start, end, nodeposition, keyspace, column_families)
 
     if not options.dry_run:
         retry_options = ExponentialBackoffRetryerConfig(options.max_tries, options.initial_sleep,
@@ -550,13 +551,13 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         success = True
     if not success:
         if repair_status:
-            repair_status.repair_fail(cmd, step, start, end, nodeposition, keyspace, column_families)
+            repair_status.repair_fail(cmd_str, step, start, end, nodeposition, keyspace, column_families)
         logging.error("FAILED: {nodeposition} step {step:04d} {cmd}".format(nodeposition=nodeposition, step=step, cmd=cmd))
         logging.error(stderr)
         return
     else:
         if repair_status:
-            repair_status.repair_success(cmd, step, start, end, nodeposition, keyspace, column_families)
+            repair_status.repair_success(cmd_str, step, start, end, nodeposition, keyspace, column_families)
     logging.debug("{nodeposition} step {step:04d} complete".format(nodeposition=nodeposition,step=step))
     return
 
