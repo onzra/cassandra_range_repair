@@ -572,7 +572,7 @@ def setup_logging(option_group):
         logger.setLevel(level=logging.DEBUG)
     elif option_group.verbose:
         logger.setLevel(level=logging.INFO)
-    elif option_group.verbose:
+    else:
         logger.setLevel(level=logging.WARNING)
 
     handlers = []
