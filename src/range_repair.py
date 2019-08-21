@@ -331,7 +331,8 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
-        self.current_repair = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        k = '{}_{}_{}_{}_{}_{}'.format(step, start, end, nodeposition, str(keyspace), str(column_families))
+        self.current_repair[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         self.write()
 
     def repair_fail(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
@@ -346,6 +347,10 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
+        k = '{}_{}_{}_{}_{}_{}'.format(step, start, end, nodeposition, str(keyspace), str(column_families))
+        self.current_repair[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        self.current_repair[k]['failed'] = True
+
         self.failed_repairs.append(
             self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         )
@@ -364,6 +369,8 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
+        k = '{}_{}_{}_{}_{}_{}'.format(step, start, end, nodeposition, str(keyspace), str(column_families))
+        del self.current_repair[k]
         self.successful_count += 1
         self.write()
 
