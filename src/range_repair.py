@@ -608,6 +608,9 @@ def repair(options):
     else:
         repair_status.start(options)
 
+    # Store all results in one large list to prevent throttling by discrete step size.
+    all_results = []
+
     for token_num, host_token in enumerate(tokens.host_tokens):
         range_termination = host_token
         range_start = tokens.get_preceding_token(range_termination)
@@ -636,8 +639,12 @@ def repair(options):
                                                                      total=tokens.host_token_count),
                                             repair_status))
                    for start, end, step in tokens.sub_range_generator(range_start, range_termination, options.steps)]
-        for r in results:
-            r.get()
+
+        all_results += results
+
+    for r in all_results:
+        r.get()
+
     repair_status.finish()
     return
 
