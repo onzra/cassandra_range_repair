@@ -315,7 +315,6 @@ class RepairStatus(object):
         :return: Token offset to resume repairs at.
         """
         # Repair settings
-        logging.critical('INSIDE')
         self.filename = options.output_status
         self.steps = options.steps
         # Load existing data from output status file
@@ -648,12 +647,9 @@ def repair(options):
     manager.start()
     repair_status = manager.RepairStatus()
 
-    logging.critical(repr(repair_status.gp()))
-
     # TODO: Modifying options.resume to use dictionary instead of offset.
     if options.resume:
         options.offset = repair_status.resume(options, tokens)
-        logging.critical(repr(repair_status.gp()))
 
         all_results = []
         for g in repair_status.gp():
