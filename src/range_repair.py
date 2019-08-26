@@ -360,7 +360,6 @@ class RepairStatus(object):
         """
         k = create_key(step, start, end, nodeposition, keyspace, column_families)
         self.current_repairs[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
-        del self.pending_repairs[k]
         self.write()
 
     def repair_fail(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
@@ -379,6 +378,7 @@ class RepairStatus(object):
         self.current_repairs[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         self.failed_repairs[k] = self.current_repairs[k]
         del self.current_repairs[k]
+        del self.pending_repairs[k]
 
         self.failed_repairs.append(
             self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
@@ -401,6 +401,7 @@ class RepairStatus(object):
         k = create_key(step, start, end, nodeposition, keyspace, column_families)
         self.finished_repairs[k] = self.current_repairs[k]
         del self.current_repairs[k]
+        del self.pending_repairs[k]
         self.successful_count += 1
         self.write()
 
