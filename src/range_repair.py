@@ -46,7 +46,7 @@ def create_key(step, start, end, nodeposition, keyspace, column_families):
     """
     keyspace = str(keyspace) or '<all>'
     column_families = '<all>' if (column_families == [] or not column_families) else str(column_families)
-    key = '{}_{}_{}_{}_{}_{}'.format(step, start, end, nodeposition, keyspace, column_families)
+    key = '{0}_{1}_{2}_{3}_{4}_{5}'.format(step, start, end, nodeposition, keyspace, column_families)
     return key
 
 
@@ -700,7 +700,10 @@ def repair(options):
             results.append(worker_pool.apply_async(repair_range, args))
 
             # TODO: Confirm that the <all> value in this is used correctly in all cases.
-            column_families = '<all>'
+            if options.columnfamily:
+                column_families = str(options.columnfamily)
+            else:
+                column_families = '<all>'
             k = create_key(step, start, end, nodeposition, str(options.keyspace), column_families)
             pending_repair = RepairStatus._build_repair_dict(
                 '', step, start, end, nodeposition, str(options.keyspace), column_families)
