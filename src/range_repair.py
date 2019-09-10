@@ -661,7 +661,7 @@ def repair(options):
             args = (options, start, end, step, nodeposition, repair_status)
             all_results.append(worker_pool.apply_async(repair_range, args))
 
-        for r in all_results:
+        for r in list(all_results):
             r.get()
 
         repair_status.finish()
@@ -711,7 +711,7 @@ def repair(options):
 
         all_results += results
 
-    for r in all_results:
+    for r in list(all_results):
         r.get()
 
     repair_status.finish()
