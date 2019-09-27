@@ -22,6 +22,7 @@ from datetime import datetime
 import json
 from multiprocessing.managers import BaseManager
 from multiprocessing import Lock
+import random
 
 write_status_lock = Lock()
 
@@ -585,6 +586,10 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         repair_status.repair_start(cmd_str, step, start, end, nodeposition, keyspace, column_families)
 
     if not options.dry_run:
+        seconds_to_sleep = random.uniform(0, 60)
+        logging.info("Sleeping for {0} seconds before run.".format(seconds_to_sleep))
+        time.sleep(seconds_to_sleep)
+
         retry_options = ExponentialBackoffRetryerConfig(options.max_tries, options.initial_sleep,
             options.sleep_factor, options.max_sleep)
         retryer = ExponentialBackoffRetryer(retry_options, lambda x: x[0], run_command)
