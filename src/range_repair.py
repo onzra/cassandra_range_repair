@@ -586,7 +586,7 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         repair_status.repair_start(cmd_str, step, start, end, nodeposition, keyspace, column_families)
 
     if not options.dry_run:
-        seconds_to_sleep = random.uniform(0, 60)
+        seconds_to_sleep = random.uniform(0, options.max_sleep_before_run)
         logging.info("Sleeping for {0} seconds before run.".format(seconds_to_sleep))
         time.sleep(seconds_to_sleep)
 
@@ -878,6 +878,9 @@ def main():
 
     parser.add_option("--resume", dest="resume", action='store_true', default=False,
                       help="Resume a hung or canceled repair session, requires an existing --output-status file")
+
+    parser.add_option("--max-sleep-before-run", dest="max_sleep_before_run", default=60,
+                      help="Maximum number of random seconds to sleep before the next execution.")
 
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
                                   "Every failed `nodetool repair` call can be retried using exponential backoff."
