@@ -879,7 +879,7 @@ def main():
     parser.add_option("--resume", dest="resume", action='store_true', default=False,
                       help="Resume a hung or canceled repair session, requires an existing --output-status file")
 
-    parser.add_option("--max-sleep-before-run", dest="max_sleep_before_run", default=60,
+    parser.add_option("--max-sleep-before-run", dest="max_sleep_before_run", type="int", default=60,
                       help="Maximum number of random seconds to sleep before the next execution.")
 
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
