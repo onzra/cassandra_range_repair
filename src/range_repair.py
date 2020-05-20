@@ -394,7 +394,7 @@ class RepairStatus(object):
                 'last_resumed_at': self.last_resumed_at,
             }))
             file.close()
-            os.chmod(self.filename, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IRGRP | stat.S_IROTH)
+            os.chmod(self.filename, stat.S_IWUSR | stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
 
     def _from_output_status(self, status):
         """
