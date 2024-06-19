@@ -525,6 +525,7 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
             keyspace=keyspace or "<all>"))
 
     cmd = [options.nodetool, "-h", options.host, "-p", options.port, "repair"]
+    if options.full: cmd.append('-full')
     if keyspace: cmd.append(keyspace)
     cmd.extend(column_families or options.columnfamily)
 
@@ -769,6 +770,10 @@ def main():
     parser.add_option("-i", "--inc", dest="inc", default="",
                       action="store_const", const="-inc",
                       metavar="INC", help="Carry out an incremental repair (post-2.1 only). Forces --par")
+
+    parser.add_option("-f", "--full", dest="full", default="",
+                      action="store_const", const="-full",
+                      metavar="FULL", help="Instruct nodetool to issue a full repair. Appends -full to nodetool command.")
 
     parser.add_option("-S", "--snapshot", dest="snapshot", default="",
                       action="store_const", const="-snapshot",
