@@ -4,23 +4,23 @@ This script will allow for smaller repairs of Cassandra ranges.
 
 Source: https://github.com/onzra/cassandra_range_repair
 """
-from __future__ import print_function
-
-from optparse import OptionParser, OptionGroup
-
+import collections
+import json
 import logging
 import logging.handlers
-import subprocess
-import sys
 import multiprocessing
+import os
 import platform
 import re
-import collections
-import time
 import six
+import stat
+import subprocess
+import sys
+import time
+from __future__ import print_function
 from datetime import datetime
-import json
 from multiprocessing.managers import BaseManager
+from optparse import OptionParser, OptionGroup
 from multiprocessing import Lock
 import random
 
@@ -450,10 +450,10 @@ class RepairStatus(object):
                     'last_resumed_at': self.last_resumed_at,
                 }))
                 file.close()
+                os.chmod(self.filename, stat.S_IWUSR | stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
 
         if self.log_status:
             logging.critical('Repair status: {0}'.format(json_status))
-
 
     def _from_output_status(self, status):
         """
