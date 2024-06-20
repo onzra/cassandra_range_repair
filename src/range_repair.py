@@ -423,7 +423,9 @@ class RepairStatus(object):
             'updated': self.updated,
             'finished': self.finished,
             'failed_repairs': self.failed_repairs,
-            'current_repair': self.current_repair,
+            'pending_repairs': self.pending_repairs,
+            'current_repairs': self.current_repairs,
+            'finished_repairs': self.finished_repairs,
             'successful_count': self.successful_count,
             'failed_count': self.failed_count,
             'steps': self.steps,
@@ -436,19 +438,7 @@ class RepairStatus(object):
             if self.filename:
                 self.updated = datetime.now().isoformat()
                 file = open(self.filename, 'w')
-                file.write(json.dumps({
-                    'started': self.started,
-                    'updated': self.updated,
-                    'finished': self.finished,
-                    'pending_repairs': self.pending_repairs,
-                    'current_repairs': self.current_repairs,
-                    'finished_repairs': self.finished_repairs,
-                    'failed_repairs': self.failed_repairs,
-                    'successful_count': self.successful_count,
-                    'failed_count': self.failed_count,
-                    'steps': self.steps,
-                    'last_resumed_at': self.last_resumed_at,
-                }))
+                file.write(json_data)
                 file.close()
 
         if self.log_status:
