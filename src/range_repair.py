@@ -272,6 +272,7 @@ class RepairStatus(object):
         """
         # Repair settings
         self.filename = None
+        self.log_status = None
         self.steps = None
         # Timestamps
         self.started = None
@@ -294,6 +295,7 @@ class RepairStatus(object):
         :param options: Range repair options.
         """
         self.filename = options.output_status
+        self.log_status = options.logfile
         self.steps = options.steps
         self.reset()
         self.started = datetime.now().isoformat()
@@ -416,6 +418,18 @@ class RepairStatus(object):
         """
         Write repair status to file, if requested.
         """
+        json_status = json.dumps({
+            'started': self.started,
+            'updated': self.updated,
+            'finished': self.finished,
+            'failed_repairs': self.failed_repairs,
+            'current_repair': self.current_repair,
+            'successful_count': self.successful_count,
+            'failed_count': self.failed_count,
+            'steps': self.steps,
+            'last_resumed_at': self.last_resumed_at,
+        })
+
         # No filename indicates output status was not requested
 
         with write_status_lock:
@@ -436,6 +450,10 @@ class RepairStatus(object):
                     'last_resumed_at': self.last_resumed_at,
                 }))
                 file.close()
+
+        if self.log_status:
+            logging.critical('Repair status: {0}'.format(json_status))
+
 
     def _from_output_status(self, status):
         """
@@ -498,6 +516,7 @@ def run_command(*command):
                             stderr=subprocess.PIPE, universal_newlines=True)
     stdout, stderr = proc.communicate()
     return proc.returncode == 0, cmd, stdout, stderr
+
 
 def repair_range(options, start, end, step, nodeposition, repair_status=None):
     """Repair a keyspace/columnfamily between a given token range with nodetool
@@ -637,6 +656,7 @@ def setup_logging(option_group):
     for handler in handlers:
         logger.addHandler(handler)
     return
+
 
 def repair(options):
     """Repair a keyspace/columnfamily by breaking each token range into $start_steps ranges
@@ -932,6 +952,7 @@ def main():
 
     repair(options)
     exit(0)
+
 
 if __name__ == "__main__":
     main()
