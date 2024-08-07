@@ -519,7 +519,7 @@ def repair_range(options, start, end, step, nodeposition, repair_status=None):
     :returns: None
     """
     if options.exclude_step:
-        excluded = is_excluded(options, start, end, step, nodeposition)
+        (excluded, exclude_step) = is_excluded(options, start, end, step, nodeposition)
         if excluded == 1:
             logging.debug(
                 "{nodeposition} step {step:04d} skipping range ({start}, {end}) for keyspace {keyspace}".format(
@@ -532,15 +532,15 @@ def repair_range(options, start, end, step, nodeposition, repair_status=None):
         elif excluded == 2:
             logging.info(
                 'Running individual repair commands for each keyspace to exclude {0} {1}'.format(
-                    options.exclude_step['keyspace'],
-                    options.exclude_step['column_family'] or ''))
+                    exclude_step['keyspace'],
+                    exclude_step['column_family'] or ''))
             for keyspace, column_families in enumerate_keyspaces(options).iteritems():
-                if keyspace == options.exclude_step['keyspace']:
+                if keyspace == exclude_step['keyspace']:
                     if options.exclude_step['column_family']:
                         logging.info('Repairing all column families except {0} for keyspace {1}'.format(
-                            options.exclude_step['column_family'],
+                            exclude_step['column_family'],
                             keyspace))
-                        cf_to_repair = [cf for cf in column_families if cf != options.exclude_step['column_family']]
+                        cf_to_repair = [cf for cf in column_families if cf != exclude_step['column_family']]
                         _repair_range(options, start, end, step, nodeposition, keyspace, cf_to_repair, repair_status)
                         continue
                     else:
@@ -742,19 +742,22 @@ def is_excluded(options, start, end, step, nodeposition):
     :param end: Ending token in the range to repair (formatted string)
     :param step: The step we're executing (for logging purposes)
     :param nodeposition: string to indicate which node this particular step is for.
-    :returns: 0 if not excluded, 1 if entire step is excluded, 2 if only keyspace is excluded.
+    :returns: tuple of two values in the format (int,dict|None) where the first value is 0 if not excluded, 1 if entire
+    step is excluded, 2 if only keyspace is excluded, and a second value with the exclude config if excluded or None if
+    not excluded.
     """
     current_node = nodeposition.split('/')[0]
-    if options.exclude_step['node'] == current_node and options.exclude_step['step'] == step:
-        if options.exclude_step['keyspace']:
-            if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
-                return 1
-            elif not options.keyspace:
-                # No options.keyspace means all keyspaces, but we only want to exclude one keyspace
-                return 2
-        else:
-            return 1
-    return 0
+    for exclude_step in options.exclude_step:
+        if exclude_step['node'] == current_node and options.exclude_step['step'] == step:
+            if options.exclude_step['keyspace']:
+                if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
+                    return 1, exclude_step
+                elif not options.keyspace:
+                    # No options.keyspace means all keyspaces, but we only want to exclude one keyspace
+                    return 2, exclude_step
+            else:
+                return 1, exclude_step
+    return 0, None
 
 def enumerate_keyspaces(options):
     """Get a dict of all keyspaces and their column families.
@@ -813,7 +816,11 @@ def parse_exclude_step(option, opt_str, value, parser):
             'node': pieces[0],
             'step': int(pieces[1])
         }
-    setattr(parser.values, option.dest, exclude_step)
+    existing_exclude_step = getattr(parser.values, option.dest)
+    if existing_exclude_step is None:
+        existing_exclude_step = []
+    existing_exclude_step.append(exclude_step)
+    setattr(parser.values, option.dest, existing_exclude_step)
 
 def main():
     """Validate arguments and initiate repair
