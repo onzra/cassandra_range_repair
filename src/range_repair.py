@@ -4,6 +4,7 @@ This script will allow for smaller repairs of Cassandra ranges.
 
 Source: https://github.com/onzra/cassandra_range_repair
 """
+from __future__ import print_function
 import collections
 import json
 import logging
@@ -17,7 +18,6 @@ import stat
 import subprocess
 import sys
 import time
-from __future__ import print_function
 from datetime import datetime
 from multiprocessing.managers import BaseManager
 from optparse import OptionParser, OptionGroup
