@@ -438,7 +438,7 @@ class RepairStatus(object):
             if self.filename:
                 self.updated = datetime.now().isoformat()
                 file = open(self.filename, 'w')
-                file.write(json_data)
+                file.write(json_status)
                 file.close()
                 os.chmod(self.filename, stat.S_IWUSR | stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
 
