@@ -184,7 +184,7 @@ def build_node(node_status, hang_timeout=DEFAULT_HANG_TIMEOUT):
             status = STATUS_HUNG
         else:
             status = STATUS_REPAIRING
-    (current_vnode, total_vnodes) = map(int, node_position.split('/'))
+    (current_vnode, total_vnodes) = list(map(int, node_position.split('/')))
     # Note this calculation assumes steps of 1 (need to put this param in status output to do proper calc)
     percentage_complete = int(float(current_vnode - num_failed) / float(total_vnodes) * 100)
     # Calculate average time taken to repair 1 vnode
@@ -264,7 +264,7 @@ def write_csv(data, file_=sys.stdout):
         'duration': 0,
         'repaired_vnodes': 0,
     }
-    for hostname, host in data['nodes'].iteritems():
+    for hostname, host in data['nodes'].items():
         # If node has no data, write an empty row and don't include in any totals
         if host['status'] == STATUS_NO_DATA:
             writer.writerow([hostname, None, None, None, None, None, None, None])
@@ -304,7 +304,7 @@ def write_csv(data, file_=sys.stdout):
         totals['start'].isoformat(),
         totals['end'].isoformat(),
         totals['duration'],
-        '{0} / {1}'.format(totals['repaired_vnodes'], len(data['nodes'].keys()) * NUM_VNODES),
+        '{0} / {1}'.format(totals['repaired_vnodes'], len(list(data['nodes'].keys())) * NUM_VNODES),
     ]
     writer.writerow(footer)
 

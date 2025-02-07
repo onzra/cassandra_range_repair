@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-from __future__ import print_function
+
 import os, sys, unittest, pkg_resources, mock, logging
 sys.path.insert(0, '..')
 sys.path.insert(0, '.')
