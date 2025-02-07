@@ -1,2 +1,5 @@
-src/range_repair.py  usr/local/bin
-README.md   usr/share/doc
+./src  opt/onzra/cassandra_repair_service
+./tests  opt/onzra/cassandra_repair_service
+./README.md  opt/onzra/cassandra_repair_service
+./requirements.txt  opt/onzra/cassandra_repair_service
+
