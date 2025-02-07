@@ -1,5 +1,6 @@
-rangerepair (1.0.2-rev1) unstable; urgency=low
+rangerepair (1.0.2-rev2) unstable; urgency=low
 
+  * forked and updated by ONZRA
   * source package automatically created by stdeb 0.6.0+git
 
- -- Venkat Kaushik <venkatesh.kaushik@emc.com>  Tue, 11 Aug 2015 10:48:05 -0400
+ -- ONZRA <info@onzra.com>  Fri, 7 Feb 2025 12:52:25 -0500

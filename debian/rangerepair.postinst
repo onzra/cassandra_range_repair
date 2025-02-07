@@ -5,7 +5,7 @@ set -e
 . /usr/share/debconf/confmodule
 
 ## set permissions for executable
-range_repair="/usr/local/bin/range_repair.py"
+range_repair="/opt/onzra/cassandra_repair_service/src/range_repair.py"
 test -f $range_repair && chmod ugo+r,og-w,+x $range_repair
 
 exit 0
