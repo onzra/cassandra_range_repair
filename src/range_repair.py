@@ -168,8 +168,22 @@ class TokenContainer:
             segments = line.split()
             # Filter tokens from joining nodes
             if (len(segments) != 8) or (segments[3] == "Joining"):
-                logging.debug("Discarding: %s", line)
-                continue
+                if len(segments) == 7 and (segments[1].endswith('Up') or segments[1].endswith('Down')):
+                    if segments[1].endswith('Up'):
+                        status = 'Up'
+                    elif segments[1].endswith('Down'):
+                        status = 'Down'
+                    else:
+                        logging.debug("Discarding: %s", line)
+                        continue
+
+                    rack_name = segments[1].replace(status, '')
+                    segments[1] = rack_name
+                    segments.insert(2, status)
+                else:
+                    logging.debug("Discarding: %s", line)
+                    continue
+
             # If a datacenter has been specified, filter nodes that are in
             # different datacenters.
             if self.options.datacenter and not segments[0] in self.local_nodes:
