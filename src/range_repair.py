@@ -5,22 +5,26 @@ This script will allow for smaller repairs of Cassandra ranges.
 Source: https://github.com/onzra/cassandra_range_repair
 """
 from __future__ import print_function
-
-from optparse import OptionParser, OptionGroup
-
+import collections
+import json
 import logging
 import logging.handlers
-import subprocess
-import sys
 import multiprocessing
+import os
 import platform
 import re
-import collections
-import time
 import six
+import stat
+import subprocess
+import sys
+import time
 from datetime import datetime
-import json
 from multiprocessing.managers import BaseManager
+from optparse import OptionParser, OptionGroup
+from multiprocessing import Lock
+import random
+
+write_status_lock = Lock()
 
 longish = six.integer_types[-1]
 
@@ -32,6 +36,19 @@ ExponentialBackoffRetryerConfig = collections.namedtuple(
         'max_sleep',
     )
 )
+
+
+def create_key(step, start, end, nodeposition, keyspace, column_families):
+    """
+    Create key used in status dict to identify a repair.
+
+    :rtype: str
+    :return: key string used to identify repair step.
+    """
+    keyspace = str(keyspace) or '<all>'
+    column_families = '<all>' if (column_families == [] or not column_families) else str(column_families)
+    key = '{0}_{1}_{2}_{3}_{4}_{5}'.format(step, start, end, nodeposition, keyspace, column_families)
+    return key
 
 
 class ExponentialBackoffRetryer:
@@ -255,6 +272,7 @@ class RepairStatus(object):
         """
         # Repair settings
         self.filename = None
+        self.log_status = None
         self.steps = None
         # Timestamps
         self.started = None
@@ -265,8 +283,10 @@ class RepairStatus(object):
         self.successful_count = 0
         self.failed_count = 0
         # Repair operations
-        self.failed_repairs = []
-        self.current_repair = {}
+        self.failed_repairs = {}
+        self.current_repairs = {}
+        self.finished_repairs = {}
+        self.pending_repairs = {}
 
     def start(self, options):
         """
@@ -275,18 +295,25 @@ class RepairStatus(object):
         :param options: Range repair options.
         """
         self.filename = options.output_status
+        self.log_status = options.logfile
         self.steps = options.steps
         self.reset()
         self.started = datetime.now().isoformat()
         self.write()
 
+    def add_pending_repair(self, k, p):
+        self.pending_repairs[k] = p
+
+    def gp(self):
+        return self.pending_repairs
+
     def resume(self, options, tokens):
         """
         Resume a hung or canceled range repair.
-        
+
         :param options: Range repair options.
         :param TokenContainer tokens: Tokens.
-        
+
         :rtype: int
         :return: Token offset to resume repairs at.
         """
@@ -304,7 +331,7 @@ class RepairStatus(object):
         # Set resumed data
         self.last_resumed_at = datetime.now().isoformat()
         self.write()
-        return int(status['current_repair']['nodeposition'].split('/')[0]) - 1
+        return True
 
     def reset(self):
         """
@@ -313,8 +340,10 @@ class RepairStatus(object):
         self.started = None
         self.updated = None
         self.finished = None
-        self.failed_repairs = []
-        self.current_repair = {}
+        self.failed_repairs = {}
+        self.current_repairs = {}
+        self.finished_repairs = {}
+        self.pending_repairs = {}
         self.failed_count = 0
         self.successful_count = 0
         self.last_resumed_at = None
@@ -331,7 +360,8 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
-        self.current_repair = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        k = create_key(step, start, end, nodeposition, keyspace, column_families)
+        self.current_repairs[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         self.write()
 
     def repair_fail(self, cmd, step, start, end, nodeposition, keyspace=None, column_families=None):
@@ -346,6 +376,12 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
+        k = create_key(step, start, end, nodeposition, keyspace, column_families)
+        self.current_repairs[k] = self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
+        self.failed_repairs[k] = self.current_repairs[k]
+        del self.current_repairs[k]
+        del self.pending_repairs[k]
+
         self.failed_repairs.append(
             self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
         )
@@ -364,6 +400,10 @@ class RepairStatus(object):
         :param keyspace: Keyspace being repaired.
         :param column_families: Column families being repaired.
         """
+        k = create_key(step, start, end, nodeposition, keyspace, column_families)
+        self.finished_repairs[k] = self.current_repairs[k]
+        del self.current_repairs[k]
+        del self.pending_repairs[k]
         self.successful_count += 1
         self.write()
 
@@ -378,35 +418,47 @@ class RepairStatus(object):
         """
         Write repair status to file, if requested.
         """
+        json_status = json.dumps({
+            'started': self.started,
+            'updated': self.updated,
+            'finished': self.finished,
+            'failed_repairs': self.failed_repairs,
+            'pending_repairs': self.pending_repairs,
+            'current_repairs': self.current_repairs,
+            'finished_repairs': self.finished_repairs,
+            'successful_count': self.successful_count,
+            'failed_count': self.failed_count,
+            'steps': self.steps,
+            'last_resumed_at': self.last_resumed_at,
+        })
+
         # No filename indicates output status was not requested
-        if self.filename:
-            self.updated = datetime.now().isoformat()
-            file = open(self.filename, 'w')
-            file.write(json.dumps({
-                'started': self.started,
-                'updated': self.updated,
-                'finished': self.finished,
-                'failed_repairs': self.failed_repairs,
-                'current_repair': self.current_repair,
-                'successful_count': self.successful_count,
-                'failed_count': self.failed_count,
-                'steps': self.steps,
-                'last_resumed_at': self.last_resumed_at,
-            }))
-            file.close()
+
+        with write_status_lock:
+            if self.filename:
+                self.updated = datetime.now().isoformat()
+                file = open(self.filename, 'w')
+                file.write(json_status)
+                file.close()
+                os.chmod(self.filename, stat.S_IWUSR | stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+        if self.log_status:
+            logging.critical('Repair status: {0}'.format(json_status))
 
     def _from_output_status(self, status):
         """
         Load data from existing output status file.
-        
-        :param dict status: Status output data. 
+
+        :param dict status: Status output data.
         """
         self.started = status['started']
         self.updated = status['updated']
         self.finished = status['finished']
         self.last_resumed_at = status['last_resumed_at']
         self.failed_repairs = status['failed_repairs']
-        self.current_repair = status['current_repair']
+        self.pending_repairs = status['pending_repairs']
+        self.current_repairs = status['current_repairs']
+        self.finished_repairs = status['finished_repairs']
         self.successful_count = status['successful_count']
         self.failed_count = status['failed_count']
 
@@ -455,6 +507,7 @@ def run_command(*command):
     stdout, stderr = proc.communicate()
     return proc.returncode == 0, cmd, stdout, stderr
 
+
 def repair_range(options, start, end, step, nodeposition, repair_status=None):
     """Repair a keyspace/columnfamily between a given token range with nodetool
     :param options: OptionParser result
@@ -466,7 +519,7 @@ def repair_range(options, start, end, step, nodeposition, repair_status=None):
     :returns: None
     """
     if options.exclude_step:
-        excluded = is_excluded(options, start, end, step, nodeposition)
+        (excluded, exclude_step) = is_excluded(options, start, end, step, nodeposition)
         if excluded == 1:
             logging.debug(
                 "{nodeposition} step {step:04d} skipping range ({start}, {end}) for keyspace {keyspace}".format(
@@ -479,15 +532,15 @@ def repair_range(options, start, end, step, nodeposition, repair_status=None):
         elif excluded == 2:
             logging.info(
                 'Running individual repair commands for each keyspace to exclude {0} {1}'.format(
-                    options.exclude_step['keyspace'],
-                    options.exclude_step['column_family'] or ''))
+                    exclude_step['keyspace'],
+                    exclude_step['column_family'] or ''))
             for keyspace, column_families in enumerate_keyspaces(options).iteritems():
-                if keyspace == options.exclude_step['keyspace']:
+                if keyspace == exclude_step['keyspace']:
                     if options.exclude_step['column_family']:
                         logging.info('Repairing all column families except {0} for keyspace {1}'.format(
-                            options.exclude_step['column_family'],
+                            exclude_step['column_family'],
                             keyspace))
-                        cf_to_repair = [cf for cf in column_families if cf != options.exclude_step['column_family']]
+                        cf_to_repair = [cf for cf in column_families if cf != exclude_step['column_family']]
                         _repair_range(options, start, end, step, nodeposition, keyspace, cf_to_repair, repair_status)
                         continue
                     else:
@@ -543,6 +596,10 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
         repair_status.repair_start(cmd_str, step, start, end, nodeposition, keyspace, column_families)
 
     if not options.dry_run:
+        seconds_to_sleep = random.uniform(0, options.max_sleep_before_run)
+        logging.info("Sleeping for {0} seconds before run.".format(seconds_to_sleep))
+        time.sleep(seconds_to_sleep)
+
         retry_options = ExponentialBackoffRetryerConfig(options.max_tries, options.initial_sleep,
             options.sleep_factor, options.max_sleep)
         retryer = ExponentialBackoffRetryer(retry_options, lambda x: x[0], run_command)
@@ -590,6 +647,7 @@ def setup_logging(option_group):
         logger.addHandler(handler)
     return
 
+
 def repair(options):
     """Repair a keyspace/columnfamily by breaking each token range into $start_steps ranges
     :param options.keyspace: Cassandra keyspace to repair
@@ -604,10 +662,31 @@ def repair(options):
     manager = TestManager()
     manager.start()
     repair_status = manager.RepairStatus()
+
+    # TODO: Modifying options.resume to use dictionary instead of offset.
     if options.resume:
         options.offset = repair_status.resume(options, tokens)
+
+        all_results = []
+        for g in repair_status.gp():
+            ga = repair_status.gp()[g]
+            nodeposition = ga['nodeposition']
+            start = ga['start']
+            end = ga['end']
+            step = ga['step']
+            args = (options, start, end, step, nodeposition, repair_status)
+            all_results.append(worker_pool.apply_async(repair_range, args))
+
+        for r in list(all_results):
+            r.get()
+
+        repair_status.finish()
+        return
     else:
         repair_status.start(options)
+
+    # Store all results in one large list to prevent throttling by discrete step size.
+    all_results = []
 
     for token_num, host_token in enumerate(tokens.host_tokens):
         range_termination = host_token
@@ -619,26 +698,38 @@ def repair(options):
                     count=token_num + 1,
                     total=tokens.host_token_count))
             continue
-        logging.info(
-            "[{count}/{total}] repairing range ({token}, {termination}) in {steps} steps for keyspace {keyspace}".format(
-                count=token_num + 1,
-                total=tokens.host_token_count,
-                token=tokens.format(range_start),
-                termination=tokens.format(range_termination),
-                steps=options.steps,
-                keyspace=options.keyspace or "<all>"))
 
-        results = [worker_pool.apply_async(repair_range,
-                                           (options,
-                                            start,
-                                            end,
-                                            step,
-                                            "{count}/{total}".format(count=token_num + 1,
-                                                                     total=tokens.host_token_count),
-                                            repair_status))
-                   for start, end, step in tokens.sub_range_generator(range_start, range_termination, options.steps)]
-        for r in results:
-            r.get()
+        # TODO: Nice to have this outside of this loop so it is less confusing (this doesn't start within loop anymore.)
+        # logging.info(
+        #     "[{count}/{total}] repairing range ({token}, {termination}) in {steps} steps for keyspace {keyspace}".format(
+        #         count=token_num + 1,
+        #         total=tokens.host_token_count,
+        #         token=tokens.format(range_start),
+        #         termination=tokens.format(range_termination),
+        #         steps=options.steps,
+        #         keyspace=options.keyspace or "<all>"))
+
+        results = []
+        for start, end, step in tokens.sub_range_generator(range_start, range_termination, options.steps):
+            nodeposition = "{count}/{total}".format(count=token_num + 1, total=tokens.host_token_count)
+            args = (options, start, end, step, nodeposition, repair_status)
+            results.append(worker_pool.apply_async(repair_range, args))
+
+            # TODO: Confirm that the <all> value in this is used correctly in all cases.
+            if options.columnfamily:
+                column_families = str(options.columnfamily)
+            else:
+                column_families = '<all>'
+            k = create_key(step, start, end, nodeposition, str(options.keyspace), column_families)
+            pending_repair = RepairStatus._build_repair_dict(
+                '', step, start, end, nodeposition, str(options.keyspace), column_families)
+            repair_status.add_pending_repair(k, pending_repair)
+
+        all_results += results
+
+    for r in list(all_results):
+        r.get()
+
     repair_status.finish()
     return
 
@@ -651,19 +742,22 @@ def is_excluded(options, start, end, step, nodeposition):
     :param end: Ending token in the range to repair (formatted string)
     :param step: The step we're executing (for logging purposes)
     :param nodeposition: string to indicate which node this particular step is for.
-    :returns: 0 if not excluded, 1 if entire step is excluded, 2 if only keyspace is excluded.
+    :returns: tuple of two values in the format (int,dict|None) where the first value is 0 if not excluded, 1 if entire
+    step is excluded, 2 if only keyspace is excluded, and a second value with the exclude config if excluded or None if
+    not excluded.
     """
     current_node = nodeposition.split('/')[0]
-    if options.exclude_step['node'] == current_node and options.exclude_step['step'] == step:
-        if options.exclude_step['keyspace']:
-            if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
-                return 1
-            elif not options.keyspace:
-                # No options.keyspace means all keyspaces, but we only want to exclude one keyspace
-                return 2
-        else:
-            return 1
-    return 0
+    for exclude_step in options.exclude_step:
+        if exclude_step['node'] == current_node and options.exclude_step['step'] == step:
+            if options.exclude_step['keyspace']:
+                if options.keyspace and options.keyspace == options.exclude_step['keyspace']:
+                    return 1, exclude_step
+                elif not options.keyspace:
+                    # No options.keyspace means all keyspaces, but we only want to exclude one keyspace
+                    return 2, exclude_step
+            else:
+                return 1, exclude_step
+    return 0, None
 
 def enumerate_keyspaces(options):
     """Get a dict of all keyspaces and their column families.
@@ -722,7 +816,11 @@ def parse_exclude_step(option, opt_str, value, parser):
             'node': pieces[0],
             'step': int(pieces[1])
         }
-    setattr(parser.values, option.dest, exclude_step)
+    existing_exclude_step = getattr(parser.values, option.dest)
+    if existing_exclude_step is None:
+        existing_exclude_step = []
+    existing_exclude_step.append(exclude_step)
+    setattr(parser.values, option.dest, existing_exclude_step)
 
 def main():
     """Validate arguments and initiate repair
@@ -803,6 +901,9 @@ def main():
     parser.add_option("--resume", dest="resume", action='store_true', default=False,
                       help="Resume a hung or canceled repair session, requires an existing --output-status file")
 
+    parser.add_option("--max-sleep-before-run", dest="max_sleep_before_run", type="int", default=60,
+                      help="Maximum number of random seconds to sleep before the next execution.")
+
     expBackoffGroup = OptionGroup(parser, "Exponential backoff options",
                                   "Every failed `nodetool repair` call can be retried using exponential backoff."
                                   " This is useful if you have flaky connectivity between datacenters.")
@@ -848,6 +949,7 @@ def main():
 
     repair(options)
     exit(0)
+
 
 if __name__ == "__main__":
     main()
