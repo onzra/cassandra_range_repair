@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 This script will allow for smaller repairs of Cassandra ranges.
 

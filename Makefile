@@ -31,14 +31,14 @@ clean-pkg:
 	find ../ -maxdepth 1 -iname '$(PACKAGE)_*.tar.gz' -exec rm -f {} +
 
 build: clean
-	python setup.py build
+	python3 setup.py build
 
 test:
-	python setup.py test
+	python3 setup.py test
 	rm -f logfile.count
 
 release: clean
-	python setup.py sdist
+	python3 setup.py sdist
 
 debian: clean-pkg
 	sh make_deb.sh
