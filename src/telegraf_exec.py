@@ -1,7 +1,12 @@
+import argparse
 import json
 
 if __name__ == '__main__':
-    json_file_path = '/var/tmp/repair_status.json'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--json-file', default='/var/tmp/repair_status.json', help='Path to JSON file with data.')
+    args = parser.parse_args()
+
+    json_file_path = args.json_file
 
     values = {}
 
@@ -14,5 +19,4 @@ if __name__ == '__main__':
     values['failed_repairs'] = len(data['failed_repairs'])
 
     values_string = ','.join('{key}={value}'.format(key=k, value=values[k]) for k in values)
-    print "cassandra_repair_progress %s" % (values_string)
-
+    print("cassandra_repair_progress %s" % (values_string))
