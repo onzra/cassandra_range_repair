@@ -121,7 +121,7 @@ class TokenContainer:
             logging.debug("No datacenter specified, all ring members' tokens will be considered")
             return
         logging.debug("Determining local ring members")
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "gossipinfo"]
+        cmd = get_command(self.options, "gossipinfo")
         success, _, stdout, stderr = run_command(*cmd)
 
         if not success:
@@ -157,7 +157,7 @@ class TokenContainer:
         :returns: None
         """
         logging.info("running nodetool ring, this will take a little bit of time")
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "ring"]
+        cmd = get_command(self.options, "ring")
         success, _, stdout, stderr = run_command(*cmd)
 
         if not success:
@@ -201,7 +201,7 @@ class TokenContainer:
         """Gets the tokens ranges for the target host
         :returns: None
         """
-        cmd = [self.options.nodetool, "-h", self.options.host, "-p", self.options.port, "info", "-T"]
+        cmd = get_command(self.options, "info", "-T")
         success, _, stdout, stderr = run_command(*cmd)
         if not success or stdout.find("Token") == -1:
             logging.error(stdout)
@@ -591,7 +591,7 @@ def _repair_range(options, start, end, step, nodeposition, keyspace=None, column
             nodeposition=nodeposition,
             keyspace=keyspace or "<all>"))
 
-    cmd = [options.nodetool, "-h", options.host, "-p", options.port, "repair"]
+    cmd = get_command(options, "repair")
     if options.full: cmd.append('-full')
     if keyspace: cmd.append(keyspace)
     cmd.extend(column_families or options.columnfamily)
@@ -779,7 +779,7 @@ def enumerate_keyspaces(options):
     :returns: Dictionary of keyspace: [column families]
     """
     logging.info('running nodetool cfstats')
-    cmd = [options.nodetool, "-h", options.host, "-p", options.port, "cfstats"]
+    cmd = get_command(options, "cfstats")
     success, _, stdout, stderr = run_command(*cmd)
 
     if not success:
@@ -836,6 +836,16 @@ def parse_exclude_step(option, opt_str, value, parser):
     existing_exclude_step.append(exclude_step)
     setattr(parser.values, option.dest, existing_exclude_step)
 
+
+def get_command(options, *args):
+    cmd = [options.nodetool]
+    cmd.extend(["-h", options.host, "-p", options.port])
+    if options.jmx_user and options.jmx_pass:
+        cmd.extend(["-u", options.jmx_user, "-pwx", options.jmx_pass])
+    cmd.extend(args)
+    return cmd
+
+
 def main():
     """Validate arguments and initiate repair
     """
@@ -861,6 +871,9 @@ def main():
 
     parser.add_option("-n", "--nodetool", dest="nodetool", default="nodetool",
                       metavar="NODETOOL", help="Path to nodetool [default: %default]")
+
+    parser.add_option("--jmx-user", default=None, help="Username to use for nodetool commands")
+    parser.add_option("--jmx-pass", default=None, help="Password to use for nodetool commands")
 
     # The module default for workers is actually the CPU count, but we're
     # going to override it to 1, which matches the old behavior of serial
