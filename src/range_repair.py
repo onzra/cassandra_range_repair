@@ -841,7 +841,7 @@ def get_command(options, *args):
     cmd = [options.nodetool]
     cmd.extend(["-h", options.host, "-p", options.port])
     if options.jmx_user and options.jmx_pass:
-        cmd.extend(["-u", options.jmx_user, "-pwx", options.jmx_pass])
+        cmd.extend(["-u", options.jmx_user, "-pw", options.jmx_pass])
     cmd.extend(args)
     return cmd
 
