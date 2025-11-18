@@ -961,7 +961,11 @@ def main():
         logging.debug('--resume requires --output-status')
         sys.exit(1)
 
-    repair(options)
+    try:
+        logging.critical('Started ONZRA Cassandra Range Repair')
+        repair(options)
+    finally:
+        logging.critical('Finished ONZRA Cassandra Range Repair ')
     exit(0)
 
 
