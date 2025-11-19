@@ -962,10 +962,10 @@ def main():
         sys.exit(1)
 
     try:
-        logging.critical('Started ONZRA Cassandra Range Repair')
+        logging.info('Started ONZRA Cassandra Range Repair')
         repair(options)
     finally:
-        logging.critical('Finished ONZRA Cassandra Range Repair ')
+        logging.info('Finished ONZRA Cassandra Range Repair ')
     exit(0)
 
 
