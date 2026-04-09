@@ -396,9 +396,6 @@ class RepairStatus(object):
         del self.current_repairs[k]
         del self.pending_repairs[k]
 
-        self.failed_repairs.append(
-            self._build_repair_dict(cmd, step, start, end, nodeposition, keyspace, column_families)
-        )
         self.failed_count += 1
         self.write()
 
